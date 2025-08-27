@@ -8,7 +8,6 @@ name: "Weekly Research"
 on:
   schedule:
   - cron: 0 9 * * 1
-  stop-after: +30d
   workflow_dispatch: null
 
 permissions: {}
