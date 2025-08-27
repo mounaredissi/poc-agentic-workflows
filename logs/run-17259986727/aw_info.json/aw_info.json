@@ -1,0 +1,19 @@
+{
+  "engine_id": "codex",
+  "engine_name": "Codex",
+  "model": "",
+  "version": "",
+  "workflow_name": "Code Review",
+  "experimental": true,
+  "supports_tools_whitelist": true,
+  "supports_http_transport": false,
+  "run_id": 17259986727,
+  "run_number": 3,
+  "run_attempt": "1",
+  "repository": "mounaredissi/poc-agentic-workflows",
+  "ref": "refs/pull/3/merge",
+  "sha": "bb5d0c0f1edb07e282e069fe36daea7a5becc5b0",
+  "actor": "mouna-redissi",
+  "event_name": "pull_request",
+  "created_at": "2025-08-27T07:16:36.816Z"
+}

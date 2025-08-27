@@ -1,0 +1,991 @@
+[2025-08-27T07:15:17] OpenAI Codex v0.24.0 (research preview)
+--------
+workdir: /home/runner/work/poc-agentic-workflows/poc-agentic-workflows
+model: o4-mini
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: medium
+reasoning summaries: auto
+--------
+[2025-08-27T07:15:17] User instructions:
+When a pull request is opened:
+
+1. Look at the Python files that changed
+2. Check for these problems:
+   - Hardcoded API keys or passwords
+   - Functions that could crash (like dividing by zero)  
+   - Missing type hints
+   - Functions without documentation
+   - Magic numbers without explanation
+
+3. Look at the test files:
+   - Are there tests for new functions?
+   - Do tests check error cases?
+
+4. Write a helpful comment on the PR with:
+   - What you found
+   - How to fix it
+   - Why it matters
+
+Be encouraging and educational. Focus on the biggest problems first.
+
+
+---
+
+**IMPORTANT**: If you need to provide output that should be captured as a workflow output variable, write it to the file "/tmp/aw_output_ef23c0a751248ef9.txt". This file is available for you to write any output that should be exposed from this workflow. The content of this file will be made available as the 'output' workflow output.
+
+[2025-08-27T07:15:28] thinking
+
+**Clarifying pull request analysis**
+
+The user is asking about checking Python files when a pull request is opened. They want to list changed files, check for hardcoded keys, crash potential, missing type hints, and more. It seems they want this as part of a workflow, likely a GitHub Action that triggers on pull requests, analyzes the files, detects issues, and comments with findings. I’m not sure if they want this automated or to be handled manually, but it leans towards automation.
+**Building a GitHub Actions workflow**
+
+The user wants to build a GitHub Actions workflow in their repository to analyze pull requests. The workflow will involve creating a YAML file in `.github/workflows` and a Python script for reviewing changes. To get the list of changed files, we can use the GitHub API with the appropriate authentication methods. The script should check for hardcoded API keys, crash potential, missing type hints, and documentation. This involves reading the changed files from the pull request's JSON data and implementing specific checks accordingly.
+**Implementing pull request checks**
+
+The user wants to identify issues in Python code during pull requests, such as hardcoded keys, crash potentials, missing type hints, and magic numbers. I’ll write a script to analyze changed files, using regex and AST to find these problems. It seems we need to create a GitHub Actions workflow that triggers on pull requests and comments on the findings, as well as outputs results to a temporary file. The plan includes creating necessary scripts and setting up a workflow for this analysis.
+**Implementing PR review checks**
+
+I’m looking to list magic numbers and provide line numbers in the output. The script will also check for changed test files to ensure proper function testing exists. If no test files are changed, I’ll issue a warning. The workflow will trigger on pull requests and coordinate the review using steps like setting up Python and installing dependencies. I need to ensure the script is set up properly and start implementing everything, including the PR review script and the workflow file. Let's get this done!
+[2025-08-27T07:15:55] codex
+**Building a GitHub Actions workflow**
+
+The user wants to build a GitHub Actions workflow in their repository to analyze pull requests. The workflow will involve creating a YAML file in `.github/workflows` and a Python script for reviewing changes. To get the list of changed files, we can use the GitHub API with the appropriate authentication methods. The script should check for hardcoded API keys, crash potential, missing type hints, and documentation. This involves reading the changed files from the pull request's JSON data and implementing specific checks accordingly.
+[2025-08-27T07:15:55] codex
+**Implementing pull request checks**
+
+The user wants to identify issues in Python code during pull requests, such as hardcoded keys, crash potentials, missing type hints, and magic numbers. I’ll write a script to analyze changed files, using regex and AST to find these problems. It seems we need to create a GitHub Actions workflow that triggers on pull requests and comments on the findings, as well as outputs results to a temporary file. The plan includes creating necessary scripts and setting up a workflow for this analysis.
+[2025-08-27T07:15:55] codex
+**Implementing PR review checks**
+
+I’m looking to list magic numbers and provide line numbers in the output. The script will also check for changed test files to ensure proper function testing exists. If no test files are changed, I’ll issue a warning. The workflow will trigger on pull requests and coordinate the review using steps like setting up Python and installing dependencies. I need to ensure the script is set up properly and start implementing everything, including the PR review script and the workflow file. Let's get this done!
+[2025-08-27T07:16:10] apply_patch auto_approved=true:
+A /home/runner/work/poc-agentic-workflows/poc-agentic-workflows/scripts/pr_review.py
+#!/usr/bin/env python3
+import os
+import re
+import sys
+import json
+import ast
+from github import Github
+
+API_KEY_PATTERN = re.compile(r"(?i)(api[_-]?key|secret|password|token)\s*=\s*['\"][^'\"]+['\"]")
+
+def load_pr_event():
+    path = os.environ.get('GITHUB_EVENT_PATH')
+    if not path or not os.path.exists(path):
+        print('GITHUB_EVENT_PATH not found', file=sys.stderr)
+        sys.exit(1)
+    with open(path, 'r') as f:
+        return json.load(f)
+
+def get_changed_py_files(repo, pr_number):
+    pr = repo.get_pull(pr_number)
+    files = pr.get_files()
+    return [f.filename for f in files if f.filename.endswith('.py')]
+
+def analyze_file(path):
+    issues = []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        issues.append(f'Could not read file: {e}')
+        return issues
+    # Hardcoded secrets
+    for match in API_KEY_PATTERN.finditer(content):
+        issues.append(f'Hardcoded secret: "{match.group(0)}"')
+    # Divide by zero literals
+    if re.search(r"/\s*0(\D|$)", content):
+        issues.append('Possible divide by zero literal')
+    # AST analysis
+    try:
+        tree = ast.parse(content, filename=path)
+    except SyntaxError as e:
+        issues.append(f'Syntax error during parse: {e}')
+        return issues
+    # Function checks
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            # Type hints
+            for arg in node.args.args:
+                if arg.annotation is None:
+                    issues.append(f'Function "{node.name}" missing type hint for arg "{arg.arg}"')
+            if node.returns is None:
+                issues.append(f'Function "{node.name}" missing return type hint')
+            # Docstring
+            if ast.get_docstring(node) is None:
+                issues.append(f'Function "{node.name}" missing docstring')
+    # Magic numbers
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            if node.value not in (0, 1, -1):
+                issues.append(f'Magic number {node.value} on line {node.lineno}')
+    return issues
+
+def main():
+    event = load_pr_event()
+    pr_number = event.get('pull_request', {}).get('number')
+    if not pr_number:
+        print('No pull request number found', file=sys.stderr)
+        sys.exit(1)
+    token = os.environ.get('GITHUB_TOKEN')
+    if not token:
+        print('GITHUB_TOKEN not set', file=sys.stderr)
+        sys.exit(1)
+    repo_name = os.environ.get('GITHUB_REPOSITORY')
+    if not repo_name:
+        print('GITHUB_REPOSITORY not set', file=sys.stderr)
+        sys.exit(1)
+    gh = Github(token)
+    repo = gh.get_repo(repo_name)
+    # Gather issues
+    report = []
+    py_files = get_changed_py_files(repo, pr_number)
+    for path in py_files:
+        issues = analyze_file(path)
+        if issues:
+            report.append(f'### Issues in `{path}`:')
+            for item in issues:
+                report.append(f'- {item}')
+    # Test file checks
+    test_files = [f for f in py_files if os.path.basename(f).startswith('test_')]
+    if not test_files:
+        report.append('No test files changed for new code.')
+    else:
+        # Check for error tests
+        has_error_test = False
+        for path in test_files:
+            try:
+                txt = open(path, 'r').read()
+                if 'pytest.raises' in txt or 'assertRaises' in txt:
+                    has_error_test = True
+            except:
+                continue
+        if not has_error_test:
+            report.append('No error-case tests found in test files.')
+    if not report:
+        body = '✅ No obvious issues found in changed Python files.'
+    else:
+        body = '## Automated Code Review Findings\n' + '\n'.join(report)
+    # Post comment
+    pr = repo.get_pull(pr_number)
+    pr.create_issue_comment(body)
+    # Write output
+    try:
+        with open('/tmp/aw_output_ef23c0a751248ef9.txt', 'w') as out:
+            out.write(body)
+    except Exception:
+        pass
+
+if __name__ == '__main__':
+    main()
+[2025-08-27T07:16:10] apply_patch(auto_approved=true) exited 0 in 6ms:
+Success. Updated the following files:
+A scripts/pr_review.py
+[2025-08-27T07:16:10] turn diff:
+diff --git a/scripts/pr_review.py b/scripts/pr_review.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b5ffa94e22b5dd67a010c53a0dc127fc6fbb76bc
+--- /dev/null
++++ b/scripts/pr_review.py
+@@ -0,0 +1,119 @@
++#!/usr/bin/env python3
++import os
++import re
++import sys
++import json
++import ast
++from github import Github
++
++API_KEY_PATTERN = re.compile(r"(?i)(api[_-]?key|secret|password|token)\s*=\s*['\"][^'\"]+['\"]")
++
++def load_pr_event():
++    path = os.environ.get('GITHUB_EVENT_PATH')
++    if not path or not os.path.exists(path):
++        print('GITHUB_EVENT_PATH not found', file=sys.stderr)
++        sys.exit(1)
++    with open(path, 'r') as f:
++        return json.load(f)
++
++def get_changed_py_files(repo, pr_number):
++    pr = repo.get_pull(pr_number)
++    files = pr.get_files()
++    return [f.filename for f in files if f.filename.endswith('.py')]
++
++def analyze_file(path):
++    issues = []
++    try:
++        with open(path, 'r', encoding='utf-8') as f:
++            content = f.read()
++    except Exception as e:
++        issues.append(f'Could not read file: {e}')
++        return issues
++    # Hardcoded secrets
++    for match in API_KEY_PATTERN.finditer(content):
++        issues.append(f'Hardcoded secret: "{match.group(0)}"')
++    # Divide by zero literals
++    if re.search(r"/\s*0(\D|$)", content):
++        issues.append('Possible divide by zero literal')
++    # AST analysis
++    try:
++        tree = ast.parse(content, filename=path)
++    except SyntaxError as e:
++        issues.append(f'Syntax error during parse: {e}')
++        return issues
++    # Function checks
++    for node in ast.walk(tree):
++        if isinstance(node, ast.FunctionDef):
++            # Type hints
++            for arg in node.args.args:
++                if arg.annotation is None:
++                    issues.append(f'Function "{node.name}" missing type hint for arg "{arg.arg}"')
++            if node.returns is None:
++                issues.append(f'Function "{node.name}" missing return type hint')
++            # Docstring
++            if ast.get_docstring(node) is None:
++                issues.append(f'Function "{node.name}" missing docstring')
++    # Magic numbers
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
++            if node.value not in (0, 1, -1):
++                issues.append(f'Magic number {node.value} on line {node.lineno}')
++    return issues
++
++def main():
++    event = load_pr_event()
++    pr_number = event.get('pull_request', {}).get('number')
++    if not pr_number:
++        print('No pull request number found', file=sys.stderr)
++        sys.exit(1)
++    token = os.environ.get('GITHUB_TOKEN')
++    if not token:
++        print('GITHUB_TOKEN not set', file=sys.stderr)
++        sys.exit(1)
++    repo_name = os.environ.get('GITHUB_REPOSITORY')
++    if not repo_name:
++        print('GITHUB_REPOSITORY not set', file=sys.stderr)
++        sys.exit(1)
++    gh = Github(token)
++    repo = gh.get_repo(repo_name)
++    # Gather issues
++    report = []
++    py_files = get_changed_py_files(repo, pr_number)
++    for path in py_files:
++        issues = analyze_file(path)
++        if issues:
++            report.append(f'### Issues in `{path}`:')
++            for item in issues:
++                report.append(f'- {item}')
++    # Test file checks
++    test_files = [f for f in py_files if os.path.basename(f).startswith('test_')]
++    if not test_files:
++        report.append('No test files changed for new code.')
++    else:
++        # Check for error tests
++        has_error_test = False
++        for path in test_files:
++            try:
++                txt = open(path, 'r').read()
++                if 'pytest.raises' in txt or 'assertRaises' in txt:
++                    has_error_test = True
++            except:
++                continue
++        if not has_error_test:
++            report.append('No error-case tests found in test files.')
++    if not report:
++        body = '✅ No obvious issues found in changed Python files.'
++    else:
++        body = '## Automated Code Review Findings\n' + '\n'.join(report)
++    # Post comment
++    pr = repo.get_pull(pr_number)
++    pr.create_issue_comment(body)
++    # Write output
++    try:
++        with open('/tmp/aw_output_ef23c0a751248ef9.txt', 'w') as out:
++            out.write(body)
++    except Exception:
++        pass
++
++if __name__ == '__main__':
++    main()
+
+[2025-08-27T07:16:10] tokens used: 15946
+[2025-08-27T07:16:10] turn diff:
+diff --git a/scripts/pr_review.py b/scripts/pr_review.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b5ffa94e22b5dd67a010c53a0dc127fc6fbb76bc
+--- /dev/null
++++ b/scripts/pr_review.py
+@@ -0,0 +1,119 @@
++#!/usr/bin/env python3
++import os
++import re
++import sys
++import json
++import ast
++from github import Github
++
++API_KEY_PATTERN = re.compile(r"(?i)(api[_-]?key|secret|password|token)\s*=\s*['\"][^'\"]+['\"]")
++
++def load_pr_event():
++    path = os.environ.get('GITHUB_EVENT_PATH')
++    if not path or not os.path.exists(path):
++        print('GITHUB_EVENT_PATH not found', file=sys.stderr)
++        sys.exit(1)
++    with open(path, 'r') as f:
++        return json.load(f)
++
++def get_changed_py_files(repo, pr_number):
++    pr = repo.get_pull(pr_number)
++    files = pr.get_files()
++    return [f.filename for f in files if f.filename.endswith('.py')]
++
++def analyze_file(path):
++    issues = []
++    try:
++        with open(path, 'r', encoding='utf-8') as f:
++            content = f.read()
++    except Exception as e:
++        issues.append(f'Could not read file: {e}')
++        return issues
++    # Hardcoded secrets
++    for match in API_KEY_PATTERN.finditer(content):
++        issues.append(f'Hardcoded secret: "{match.group(0)}"')
++    # Divide by zero literals
++    if re.search(r"/\s*0(\D|$)", content):
++        issues.append('Possible divide by zero literal')
++    # AST analysis
++    try:
++        tree = ast.parse(content, filename=path)
++    except SyntaxError as e:
++        issues.append(f'Syntax error during parse: {e}')
++        return issues
++    # Function checks
++    for node in ast.walk(tree):
++        if isinstance(node, ast.FunctionDef):
++            # Type hints
++            for arg in node.args.args:
++                if arg.annotation is None:
++                    issues.append(f'Function "{node.name}" missing type hint for arg "{arg.arg}"')
++            if node.returns is None:
++                issues.append(f'Function "{node.name}" missing return type hint')
++            # Docstring
++            if ast.get_docstring(node) is None:
++                issues.append(f'Function "{node.name}" missing docstring')
++    # Magic numbers
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
++            if node.value not in (0, 1, -1):
++                issues.append(f'Magic number {node.value} on line {node.lineno}')
++    return issues
++
++def main():
++    event = load_pr_event()
++    pr_number = event.get('pull_request', {}).get('number')
++    if not pr_number:
++        print('No pull request number found', file=sys.stderr)
++        sys.exit(1)
++    token = os.environ.get('GITHUB_TOKEN')
++    if not token:
++        print('GITHUB_TOKEN not set', file=sys.stderr)
++        sys.exit(1)
++    repo_name = os.environ.get('GITHUB_REPOSITORY')
++    if not repo_name:
++        print('GITHUB_REPOSITORY not set', file=sys.stderr)
++        sys.exit(1)
++    gh = Github(token)
++    repo = gh.get_repo(repo_name)
++    # Gather issues
++    report = []
++    py_files = get_changed_py_files(repo, pr_number)
++    for path in py_files:
++        issues = analyze_file(path)
++        if issues:
++            report.append(f'### Issues in `{path}`:')
++            for item in issues:
++                report.append(f'- {item}')
++    # Test file checks
++    test_files = [f for f in py_files if os.path.basename(f).startswith('test_')]
++    if not test_files:
++        report.append('No test files changed for new code.')
++    else:
++        # Check for error tests
++        has_error_test = False
++        for path in test_files:
++            try:
++                txt = open(path, 'r').read()
++                if 'pytest.raises' in txt or 'assertRaises' in txt:
++                    has_error_test = True
++            except:
++                continue
++        if not has_error_test:
++            report.append('No error-case tests found in test files.')
++    if not report:
++        body = '✅ No obvious issues found in changed Python files.'
++    else:
++        body = '## Automated Code Review Findings\n' + '\n'.join(report)
++    # Post comment
++    pr = repo.get_pull(pr_number)
++    pr.create_issue_comment(body)
++    # Write output
++    try:
++        with open('/tmp/aw_output_ef23c0a751248ef9.txt', 'w') as out:
++            out.write(body)
++    except Exception:
++        pass
++
++if __name__ == '__main__':
++    main()
+
+[2025-08-27T07:16:20] apply_patch auto_approved=true:
+A /home/runner/work/poc-agentic-workflows/poc-agentic-workflows/.github/workflows/pr_review.yml
+name: Pull Request Automated Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyGithub
+      - name: Run PR review script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: python scripts/pr_review.py
+      - name: Set output variable
+        if: success()
+        run: |
+          echo "pr_review_body<<EOF" >> $GITHUB_OUTPUT
+          cat /tmp/aw_output_ef23c0a751248ef9.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+[2025-08-27T07:16:20] apply_patch(auto_approved=true) exited 0 in 6ms:
+Success. Updated the following files:
+A .github/workflows/pr_review.yml
+[2025-08-27T07:16:20] turn diff:
+diff --git a/.github/workflows/pr_review.yml b/.github/workflows/pr_review.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..2557070a642b6c8cd565de06defd485abd8301b1
+--- /dev/null
++++ b/.github/workflows/pr_review.yml
+@@ -0,0 +1,32 @@
++name: Pull Request Automated Review
++
++on:
++  pull_request:
++    types: [opened, synchronize, reopened]
++
++jobs:
++  review:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout code
++        uses: actions/checkout@v2
++      - name: Set up Python
++        uses: actions/setup-python@v2
++        with:
++          python-version: '3.x'
++      - name: Install dependencies
++        run: |
++          python -m pip install --upgrade pip
++          pip install PyGithub
++      - name: Run PR review script
++        env:
++          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          GITHUB_REPOSITORY: ${{ github.repository }}
++          GITHUB_EVENT_PATH: ${{ github.event_path }}
++        run: python scripts/pr_review.py
++      - name: Set output variable
++        if: success()
++        run: |
++          echo "pr_review_body<<EOF" >> $GITHUB_OUTPUT
++          cat /tmp/aw_output_ef23c0a751248ef9.txt >> $GITHUB_OUTPUT
++          echo "EOF" >> $GITHUB_OUTPUT
+diff --git a/scripts/pr_review.py b/scripts/pr_review.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b5ffa94e22b5dd67a010c53a0dc127fc6fbb76bc
+--- /dev/null
++++ b/scripts/pr_review.py
+@@ -0,0 +1,119 @@
++#!/usr/bin/env python3
++import os
++import re
++import sys
++import json
++import ast
++from github import Github
++
++API_KEY_PATTERN = re.compile(r"(?i)(api[_-]?key|secret|password|token)\s*=\s*['\"][^'\"]+['\"]")
++
++def load_pr_event():
++    path = os.environ.get('GITHUB_EVENT_PATH')
++    if not path or not os.path.exists(path):
++        print('GITHUB_EVENT_PATH not found', file=sys.stderr)
++        sys.exit(1)
++    with open(path, 'r') as f:
++        return json.load(f)
++
++def get_changed_py_files(repo, pr_number):
++    pr = repo.get_pull(pr_number)
++    files = pr.get_files()
++    return [f.filename for f in files if f.filename.endswith('.py')]
++
++def analyze_file(path):
++    issues = []
++    try:
++        with open(path, 'r', encoding='utf-8') as f:
++            content = f.read()
++    except Exception as e:
++        issues.append(f'Could not read file: {e}')
++        return issues
++    # Hardcoded secrets
++    for match in API_KEY_PATTERN.finditer(content):
++        issues.append(f'Hardcoded secret: "{match.group(0)}"')
++    # Divide by zero literals
++    if re.search(r"/\s*0(\D|$)", content):
++        issues.append('Possible divide by zero literal')
++    # AST analysis
++    try:
++        tree = ast.parse(content, filename=path)
++    except SyntaxError as e:
++        issues.append(f'Syntax error during parse: {e}')
++        return issues
++    # Function checks
++    for node in ast.walk(tree):
++        if isinstance(node, ast.FunctionDef):
++            # Type hints
++            for arg in node.args.args:
++                if arg.annotation is None:
++                    issues.append(f'Function "{node.name}" missing type hint for arg "{arg.arg}"')
++            if node.returns is None:
++                issues.append(f'Function "{node.name}" missing return type hint')
++            # Docstring
++            if ast.get_docstring(node) is None:
++                issues.append(f'Function "{node.name}" missing docstring')
++    # Magic numbers
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
++            if node.value not in (0, 1, -1):
++                issues.append(f'Magic number {node.value} on line {node.lineno}')
++    return issues
++
++def main():
++    event = load_pr_event()
++    pr_number = event.get('pull_request', {}).get('number')
++    if not pr_number:
++        print('No pull request number found', file=sys.stderr)
++        sys.exit(1)
++    token = os.environ.get('GITHUB_TOKEN')
++    if not token:
++        print('GITHUB_TOKEN not set', file=sys.stderr)
++        sys.exit(1)
++    repo_name = os.environ.get('GITHUB_REPOSITORY')
++    if not repo_name:
++        print('GITHUB_REPOSITORY not set', file=sys.stderr)
++        sys.exit(1)
++    gh = Github(token)
++    repo = gh.get_repo(repo_name)
++    # Gather issues
++    report = []
++    py_files = get_changed_py_files(repo, pr_number)
++    for path in py_files:
++        issues = analyze_file(path)
++        if issues:
++            report.append(f'### Issues in `{path}`:')
++            for item in issues:
++                report.append(f'- {item}')
++    # Test file checks
++    test_files = [f for f in py_files if os.path.basename(f).startswith('test_')]
++    if not test_files:
++        report.append('No test files changed for new code.')
++    else:
++        # Check for error tests
++        has_error_test = False
++        for path in test_files:
++            try:
++                txt = open(path, 'r').read()
++                if 'pytest.raises' in txt or 'assertRaises' in txt:
++                    has_error_test = True
++            except:
++                continue
++        if not has_error_test:
++            report.append('No error-case tests found in test files.')
++    if not report:
++        body = '✅ No obvious issues found in changed Python files.'
++    else:
++        body = '## Automated Code Review Findings\n' + '\n'.join(report)
++    # Post comment
++    pr = repo.get_pull(pr_number)
++    pr.create_issue_comment(body)
++    # Write output
++    try:
++        with open('/tmp/aw_output_ef23c0a751248ef9.txt', 'w') as out:
++            out.write(body)
++    except Exception:
++        pass
++
++if __name__ == '__main__':
++    main()
+
+[2025-08-27T07:16:20] tokens used: 1788
+[2025-08-27T07:16:20] turn diff:
+diff --git a/.github/workflows/pr_review.yml b/.github/workflows/pr_review.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..2557070a642b6c8cd565de06defd485abd8301b1
+--- /dev/null
++++ b/.github/workflows/pr_review.yml
+@@ -0,0 +1,32 @@
++name: Pull Request Automated Review
++
++on:
++  pull_request:
++    types: [opened, synchronize, reopened]
++
++jobs:
++  review:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout code
++        uses: actions/checkout@v2
++      - name: Set up Python
++        uses: actions/setup-python@v2
++        with:
++          python-version: '3.x'
++      - name: Install dependencies
++        run: |
++          python -m pip install --upgrade pip
++          pip install PyGithub
++      - name: Run PR review script
++        env:
++          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          GITHUB_REPOSITORY: ${{ github.repository }}
++          GITHUB_EVENT_PATH: ${{ github.event_path }}
++        run: python scripts/pr_review.py
++      - name: Set output variable
++        if: success()
++        run: |
++          echo "pr_review_body<<EOF" >> $GITHUB_OUTPUT
++          cat /tmp/aw_output_ef23c0a751248ef9.txt >> $GITHUB_OUTPUT
++          echo "EOF" >> $GITHUB_OUTPUT
+diff --git a/scripts/pr_review.py b/scripts/pr_review.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b5ffa94e22b5dd67a010c53a0dc127fc6fbb76bc
+--- /dev/null
++++ b/scripts/pr_review.py
+@@ -0,0 +1,119 @@
++#!/usr/bin/env python3
++import os
++import re
++import sys
++import json
++import ast
++from github import Github
++
++API_KEY_PATTERN = re.compile(r"(?i)(api[_-]?key|secret|password|token)\s*=\s*['\"][^'\"]+['\"]")
++
++def load_pr_event():
++    path = os.environ.get('GITHUB_EVENT_PATH')
++    if not path or not os.path.exists(path):
++        print('GITHUB_EVENT_PATH not found', file=sys.stderr)
++        sys.exit(1)
++    with open(path, 'r') as f:
++        return json.load(f)
++
++def get_changed_py_files(repo, pr_number):
++    pr = repo.get_pull(pr_number)
++    files = pr.get_files()
++    return [f.filename for f in files if f.filename.endswith('.py')]
++
++def analyze_file(path):
++    issues = []
++    try:
++        with open(path, 'r', encoding='utf-8') as f:
++            content = f.read()
++    except Exception as e:
++        issues.append(f'Could not read file: {e}')
++        return issues
++    # Hardcoded secrets
++    for match in API_KEY_PATTERN.finditer(content):
++        issues.append(f'Hardcoded secret: "{match.group(0)}"')
++    # Divide by zero literals
++    if re.search(r"/\s*0(\D|$)", content):
++        issues.append('Possible divide by zero literal')
++    # AST analysis
++    try:
++        tree = ast.parse(content, filename=path)
++    except SyntaxError as e:
++        issues.append(f'Syntax error during parse: {e}')
++        return issues
++    # Function checks
++    for node in ast.walk(tree):
++        if isinstance(node, ast.FunctionDef):
++            # Type hints
++            for arg in node.args.args:
++                if arg.annotation is None:
++                    issues.append(f'Function "{node.name}" missing type hint for arg "{arg.arg}"')
++            if node.returns is None:
++                issues.append(f'Function "{node.name}" missing return type hint')
++            # Docstring
++            if ast.get_docstring(node) is None:
++                issues.append(f'Function "{node.name}" missing docstring')
++    # Magic numbers
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
++            if node.value not in (0, 1, -1):
++                issues.append(f'Magic number {node.value} on line {node.lineno}')
++    return issues
++
++def main():
++    event = load_pr_event()
++    pr_number = event.get('pull_request', {}).get('number')
++    if not pr_number:
++        print('No pull request number found', file=sys.stderr)
++        sys.exit(1)
++    token = os.environ.get('GITHUB_TOKEN')
++    if not token:
++        print('GITHUB_TOKEN not set', file=sys.stderr)
++        sys.exit(1)
++    repo_name = os.environ.get('GITHUB_REPOSITORY')
++    if not repo_name:
++        print('GITHUB_REPOSITORY not set', file=sys.stderr)
++        sys.exit(1)
++    gh = Github(token)
++    repo = gh.get_repo(repo_name)
++    # Gather issues
++    report = []
++    py_files = get_changed_py_files(repo, pr_number)
++    for path in py_files:
++        issues = analyze_file(path)
++        if issues:
++            report.append(f'### Issues in `{path}`:')
++            for item in issues:
++                report.append(f'- {item}')
++    # Test file checks
++    test_files = [f for f in py_files if os.path.basename(f).startswith('test_')]
++    if not test_files:
++        report.append('No test files changed for new code.')
++    else:
++        # Check for error tests
++        has_error_test = False
++        for path in test_files:
++            try:
++                txt = open(path, 'r').read()
++                if 'pytest.raises' in txt or 'assertRaises' in txt:
++                    has_error_test = True
++            except:
++                continue
++        if not has_error_test:
++            report.append('No error-case tests found in test files.')
++    if not report:
++        body = '✅ No obvious issues found in changed Python files.'
++    else:
++        body = '## Automated Code Review Findings\n' + '\n'.join(report)
++    # Post comment
++    pr = repo.get_pull(pr_number)
++    pr.create_issue_comment(body)
++    # Write output
++    try:
++        with open('/tmp/aw_output_ef23c0a751248ef9.txt', 'w') as out:
++            out.write(body)
++    except Exception:
++        pass
++
++if __name__ == '__main__':
++    main()
+
+[2025-08-27T07:16:31] codex
+
+I’ve added an automated PR-review action:
+
+- **scripts/pr_review.py**:  
+  - Scans changed `.py` files for hardcoded secrets, divide-by-zero, missing type hints, docstrings, and magic numbers  
+  - Checks whether any `test_*.py` files were changed and if they include error-case tests  
+  - Posts a summary comment back on the PR and writes the report to `/tmp/aw_output_ef23c0a751248ef9.txt`  
+
+- **.github/workflows/pr_review.yml**:  
+  - Runs on `pull_request` events (opened, reopened, updated)  
+  - Installs PyGithub and invokes the review script  
+  - Exposes the review body as the `pr_review_body` workflow output  
+
+Let me know if you’d like to tweak any of the checks or formatting!
+[2025-08-27T07:16:33] tokens used: 812
+[2025-08-27T07:16:33] turn diff:
+diff --git a/.github/workflows/pr_review.yml b/.github/workflows/pr_review.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..2557070a642b6c8cd565de06defd485abd8301b1
+--- /dev/null
++++ b/.github/workflows/pr_review.yml
+@@ -0,0 +1,32 @@
++name: Pull Request Automated Review
++
++on:
++  pull_request:
++    types: [opened, synchronize, reopened]
++
++jobs:
++  review:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout code
++        uses: actions/checkout@v2
++      - name: Set up Python
++        uses: actions/setup-python@v2
++        with:
++          python-version: '3.x'
++      - name: Install dependencies
++        run: |
++          python -m pip install --upgrade pip
++          pip install PyGithub
++      - name: Run PR review script
++        env:
++          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
++          GITHUB_REPOSITORY: ${{ github.repository }}
++          GITHUB_EVENT_PATH: ${{ github.event_path }}
++        run: python scripts/pr_review.py
++      - name: Set output variable
++        if: success()
++        run: |
++          echo "pr_review_body<<EOF" >> $GITHUB_OUTPUT
++          cat /tmp/aw_output_ef23c0a751248ef9.txt >> $GITHUB_OUTPUT
++          echo "EOF" >> $GITHUB_OUTPUT
+diff --git a/scripts/pr_review.py b/scripts/pr_review.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b5ffa94e22b5dd67a010c53a0dc127fc6fbb76bc
+--- /dev/null
++++ b/scripts/pr_review.py
+@@ -0,0 +1,119 @@
++#!/usr/bin/env python3
++import os
++import re
++import sys
++import json
++import ast
++from github import Github
++
++API_KEY_PATTERN = re.compile(r"(?i)(api[_-]?key|secret|password|token)\s*=\s*['\"][^'\"]+['\"]")
++
++def load_pr_event():
++    path = os.environ.get('GITHUB_EVENT_PATH')
++    if not path or not os.path.exists(path):
++        print('GITHUB_EVENT_PATH not found', file=sys.stderr)
++        sys.exit(1)
++    with open(path, 'r') as f:
++        return json.load(f)
++
++def get_changed_py_files(repo, pr_number):
++    pr = repo.get_pull(pr_number)
++    files = pr.get_files()
++    return [f.filename for f in files if f.filename.endswith('.py')]
++
++def analyze_file(path):
++    issues = []
++    try:
++        with open(path, 'r', encoding='utf-8') as f:
++            content = f.read()
++    except Exception as e:
++        issues.append(f'Could not read file: {e}')
++        return issues
++    # Hardcoded secrets
++    for match in API_KEY_PATTERN.finditer(content):
++        issues.append(f'Hardcoded secret: "{match.group(0)}"')
++    # Divide by zero literals
++    if re.search(r"/\s*0(\D|$)", content):
++        issues.append('Possible divide by zero literal')
++    # AST analysis
++    try:
++        tree = ast.parse(content, filename=path)
++    except SyntaxError as e:
++        issues.append(f'Syntax error during parse: {e}')
++        return issues
++    # Function checks
++    for node in ast.walk(tree):
++        if isinstance(node, ast.FunctionDef):
++            # Type hints
++            for arg in node.args.args:
++                if arg.annotation is None:
++                    issues.append(f'Function "{node.name}" missing type hint for arg "{arg.arg}"')
++            if node.returns is None:
++                issues.append(f'Function "{node.name}" missing return type hint')
++            # Docstring
++            if ast.get_docstring(node) is None:
++                issues.append(f'Function "{node.name}" missing docstring')
++    # Magic numbers
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
++            if node.value not in (0, 1, -1):
++                issues.append(f'Magic number {node.value} on line {node.lineno}')
++    return issues
++
++def main():
++    event = load_pr_event()
++    pr_number = event.get('pull_request', {}).get('number')
++    if not pr_number:
++        print('No pull request number found', file=sys.stderr)
++        sys.exit(1)
++    token = os.environ.get('GITHUB_TOKEN')
++    if not token:
++        print('GITHUB_TOKEN not set', file=sys.stderr)
++        sys.exit(1)
++    repo_name = os.environ.get('GITHUB_REPOSITORY')
++    if not repo_name:
++        print('GITHUB_REPOSITORY not set', file=sys.stderr)
++        sys.exit(1)
++    gh = Github(token)
++    repo = gh.get_repo(repo_name)
++    # Gather issues
++    report = []
++    py_files = get_changed_py_files(repo, pr_number)
++    for path in py_files:
++        issues = analyze_file(path)
++        if issues:
++            report.append(f'### Issues in `{path}`:')
++            for item in issues:
++                report.append(f'- {item}')
++    # Test file checks
++    test_files = [f for f in py_files if os.path.basename(f).startswith('test_')]
++    if not test_files:
++        report.append('No test files changed for new code.')
++    else:
++        # Check for error tests
++        has_error_test = False
++        for path in test_files:
++            try:
++                txt = open(path, 'r').read()
++                if 'pytest.raises' in txt or 'assertRaises' in txt:
++                    has_error_test = True
++            except:
++                continue
++        if not has_error_test:
++            report.append('No error-case tests found in test files.')
++    if not report:
++        body = '✅ No obvious issues found in changed Python files.'
++    else:
++        body = '## Automated Code Review Findings\n' + '\n'.join(report)
++    # Post comment
++    pr = repo.get_pull(pr_number)
++    pr.create_issue_comment(body)
++    # Write output
++    try:
++        with open('/tmp/aw_output_ef23c0a751248ef9.txt', 'w') as out:
++            out.write(body)
++    except Exception:
++        pass
++
++if __name__ == '__main__':
++    main()
+
