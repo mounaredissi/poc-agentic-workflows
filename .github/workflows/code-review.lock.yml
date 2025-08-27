@@ -2,7 +2,7 @@
 # To update this file, edit the corresponding .md file and run:
 #   gh aw compile
 
-name: "Simple natural language program for code review"
+name: "Code Review"
 on:
   pull_request:
     types:
@@ -15,19 +15,29 @@ concurrency:
   group: "gh-aw-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
   cancel-in-progress: true
 
-run-name: "Simple natural language program for code review"
+run-name: "Code Review"
 
 jobs:
-  simple-natural-language-program-for-code-review:
+  code-review:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+      issues: read
+      pull-requests: read
+      discussions: read
+      deployments: read
+      models: read
     outputs:
       output: ${{ steps.collect_output.outputs.output }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Codex
+        run: npm install -g @openai/codex
       - name: Setup agent output
         id: setup_agent_output
         uses: actions/github-script@v7
@@ -56,25 +66,21 @@ jobs:
       - name: Setup MCPs
         run: |
           mkdir -p /tmp/mcp-config
-          cat > /tmp/mcp-config/mcp-servers.json << 'EOF'
-          {
-            "mcpServers": {
-              "github": {
-                "command": "docker",
-                "args": [
-                  "run",
-                  "-i",
-                  "--rm",
-                  "-e",
-                  "GITHUB_PERSONAL_ACCESS_TOKEN",
-                  "ghcr.io/github/github-mcp-server:sha-45e90ae"
-                ],
-                "env": {
-                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
-                }
-              }
-            }
-          }
+          cat > /tmp/mcp-config/config.toml << EOF
+          [history]
+          persistence = "none"
+          
+          [mcp_servers.github]
+          command = "docker"
+          args = [
+            "run",
+            "-i",
+            "--rm",
+            "-e",
+            "GITHUB_PERSONAL_ACCESS_TOKEN",
+            "ghcr.io/github/github-mcp-server:sha-45e90ae"
+          ]
+          env = { "GITHUB_PERSONAL_ACCESS_TOKEN" = "${{ secrets.GITHUB_TOKEN }}" }
           EOF
       - name: Create prompt
         env:
@@ -82,33 +88,26 @@ jobs:
         run: |
           mkdir -p /tmp/aw-prompts
           cat > /tmp/aw-prompts/prompt.txt << 'EOF'
-          # Simple natural language program for code review
-          When a pull request is opened or updated:
+          When a pull request is opened:
           
-          1. **Review the Python code changes** for common issues:
-             - Check for hardcoded secrets or API keys
-             - Look for functions that might crash (like division by zero)
-             - Identify missing type hints
-             - Find functions without docstrings
-             - Check for magic numbers that need explanation
+          1. Look at the Python files that changed
+          2. Check for these problems:
+             - Hardcoded API keys or passwords
+             - Functions that could crash (like dividing by zero)  
+             - Missing type hints
+             - Functions without documentation
+             - Magic numbers without explanation
           
-          2. **Review the tests**:
-             - Look for missing test methods
-             - Identify edge cases that aren't tested
-             - Check if error conditions are tested
+          3. Look at the test files:
+             - Are there tests for new functions?
+             - Do tests check error cases?
           
-          3. **Provide helpful feedback**:
-             - Comment on specific lines with issues
-             - Suggest concrete improvements with examples
-             - Explain why each issue matters
-             - Be encouraging and educational
+          4. Write a helpful comment on the PR with:
+             - What you found
+             - How to fix it
+             - Why it matters
           
-          4. **Focus on the most important issues first**:
-             - Security problems (hardcoded secrets)
-             - Bugs that cause crashes
-             - Missing tests for critical functions
-          
-          Keep feedback simple and actionable. The goal is to help improve code quality while being educational.
+          Be encouraging and educational. Focus on the biggest problems first.
           
           
           ---
@@ -129,14 +128,14 @@ jobs:
             const fs = require('fs');
             
             const awInfo = {
-              engine_id: "claude",
-              engine_name: "Claude Code",
+              engine_id: "codex",
+              engine_name: "Codex",
               model: "",
               version: "",
-              workflow_name: "Simple natural language program for code review",
-              experimental: false,
+              workflow_name: "Code Review",
+              experimental: true,
               supports_tools_whitelist: true,
-              supports_http_transport: true,
+              supports_http_transport: false,
               run_id: context.runId,
               run_number: context.runNumber,
               run_attempt: process.env.GITHUB_RUN_ATTEMPT,
@@ -160,83 +159,22 @@ jobs:
           name: aw_info.json
           path: /tmp/aw_info.json
           if-no-files-found: warn
-      - name: Execute Claude Code Action
-        id: agentic_execution
-        uses: anthropics/claude-code-base-action@v0.0.56
-        with:
-          # Allowed tools (sorted):
-          # - Glob
-          # - Grep
-          # - LS
-          # - NotebookRead
-          # - Read
-          # - Task
-          # - mcp__github__download_workflow_run_artifact
-          # - mcp__github__get_code_scanning_alert
-          # - mcp__github__get_commit
-          # - mcp__github__get_dependabot_alert
-          # - mcp__github__get_discussion
-          # - mcp__github__get_discussion_comments
-          # - mcp__github__get_file_contents
-          # - mcp__github__get_issue
-          # - mcp__github__get_issue_comments
-          # - mcp__github__get_job_logs
-          # - mcp__github__get_me
-          # - mcp__github__get_notification_details
-          # - mcp__github__get_pull_request
-          # - mcp__github__get_pull_request_comments
-          # - mcp__github__get_pull_request_diff
-          # - mcp__github__get_pull_request_files
-          # - mcp__github__get_pull_request_reviews
-          # - mcp__github__get_pull_request_status
-          # - mcp__github__get_secret_scanning_alert
-          # - mcp__github__get_tag
-          # - mcp__github__get_workflow_run
-          # - mcp__github__get_workflow_run_logs
-          # - mcp__github__get_workflow_run_usage
-          # - mcp__github__list_branches
-          # - mcp__github__list_code_scanning_alerts
-          # - mcp__github__list_commits
-          # - mcp__github__list_dependabot_alerts
-          # - mcp__github__list_discussion_categories
-          # - mcp__github__list_discussions
-          # - mcp__github__list_issues
-          # - mcp__github__list_notifications
-          # - mcp__github__list_pull_requests
-          # - mcp__github__list_secret_scanning_alerts
-          # - mcp__github__list_tags
-          # - mcp__github__list_workflow_jobs
-          # - mcp__github__list_workflow_run_artifacts
-          # - mcp__github__list_workflow_runs
-          # - mcp__github__list_workflows
-          # - mcp__github__search_code
-          # - mcp__github__search_issues
-          # - mcp__github__search_orgs
-          # - mcp__github__search_pull_requests
-          # - mcp__github__search_repositories
-          # - mcp__github__search_users
-          allowed_tools: "Glob,Grep,LS,NotebookRead,Read,Task,mcp__github__download_workflow_run_artifact,mcp__github__get_code_scanning_alert,mcp__github__get_commit,mcp__github__get_dependabot_alert,mcp__github__get_discussion,mcp__github__get_discussion_comments,mcp__github__get_file_contents,mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__get_job_logs,mcp__github__get_me,mcp__github__get_notification_details,mcp__github__get_pull_request,mcp__github__get_pull_request_comments,mcp__github__get_pull_request_diff,mcp__github__get_pull_request_files,mcp__github__get_pull_request_reviews,mcp__github__get_pull_request_status,mcp__github__get_secret_scanning_alert,mcp__github__get_tag,mcp__github__get_workflow_run,mcp__github__get_workflow_run_logs,mcp__github__get_workflow_run_usage,mcp__github__list_branches,mcp__github__list_code_scanning_alerts,mcp__github__list_commits,mcp__github__list_dependabot_alerts,mcp__github__list_discussion_categories,mcp__github__list_discussions,mcp__github__list_issues,mcp__github__list_notifications,mcp__github__list_pull_requests,mcp__github__list_secret_scanning_alerts,mcp__github__list_tags,mcp__github__list_workflow_jobs,mcp__github__list_workflow_run_artifacts,mcp__github__list_workflow_runs,mcp__github__list_workflows,mcp__github__search_code,mcp__github__search_issues,mcp__github__search_orgs,mcp__github__search_pull_requests,mcp__github__search_repositories,mcp__github__search_users"
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_env: |
-            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            GITHUB_AW_OUTPUT: ${{ env.GITHUB_AW_OUTPUT }}
-          mcp_config: /tmp/mcp-config/mcp-servers.json
-          prompt_file: /tmp/aw-prompts/prompt.txt
-          timeout_minutes: 5
-        env:
-          GITHUB_AW_OUTPUT: ${{ env.GITHUB_AW_OUTPUT }}
-      - name: Capture Agentic Action logs
-        if: always()
+      - name: Run Codex
         run: |
-          # Copy the detailed execution file from Agentic Action if available
-          if [ -n "${{ steps.agentic_execution.outputs.execution_file }}" ] && [ -f "${{ steps.agentic_execution.outputs.execution_file }}" ]; then
-            cp ${{ steps.agentic_execution.outputs.execution_file }} /tmp/simple-natural-language-program-for-code-review.log
-          else
-            echo "No execution file output found from Agentic Action" >> /tmp/simple-natural-language-program-for-code-review.log
-          fi
+          INSTRUCTION=$(cat /tmp/aw-prompts/prompt.txt)
+          export CODEX_HOME=/tmp/mcp-config
           
-          # Ensure log file exists
-          touch /tmp/simple-natural-language-program-for-code-review.log
+          # Create log directory outside git repo
+          mkdir -p /tmp/aw-logs
+          
+          # Run codex with log capture
+          codex exec \
+            -c model=o4-mini \
+            --full-auto "$INSTRUCTION" 2>&1 | tee /tmp/code-review.log
+        env:
+          GITHUB_STEP_SUMMARY: ${{ env.GITHUB_STEP_SUMMARY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_AW_OUTPUT: ${{ env.GITHUB_AW_OUTPUT }}
       - name: Check if workflow-complete.txt exists, if so upload it
         id: check_file
         run: |
@@ -407,20 +345,12 @@ jobs:
           name: aw_output.txt
           path: ${{ env.GITHUB_AW_OUTPUT }}
           if-no-files-found: warn
-      - name: Upload engine output files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent_outputs
-          path: |
-            output.txt
-          if-no-files-found: ignore
       - name: Upload agent logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: simple-natural-language-program-for-code-review.log
-          path: /tmp/simple-natural-language-program-for-code-review.log
+          name: code-review.log
+          path: /tmp/code-review.log
           if-no-files-found: warn
       - name: Generate git patch
         if: always()
