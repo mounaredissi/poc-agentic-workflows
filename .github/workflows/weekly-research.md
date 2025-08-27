@@ -4,8 +4,7 @@ on:
     # Every week, 9AM UTC, Monday
     - cron: "0 9 * * 1"
   workflow_dispatch:
-
-  stop-after: +30d # workflow will no longer trigger after 30 days. Remove this and recompile to run indefinitely
+engine: codex 
 
 timeout_minutes: 15
 permissions:
